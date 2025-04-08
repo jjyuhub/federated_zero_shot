@@ -19,52 +19,56 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install numpy
 
-      - name: Simulate Local Training Update, Leader Election, and Snapshot
+      - name: Simulate Local Training Update, Hyperparameter Tuning, and Snapshot
         run: |
           python - <<'EOF'
           import os, json, time, numpy as np
           
-          # Use the node's identifier as seed basis for reproducibility
+          # Get unique node identifier from the environment
           node_id = os.environ["NODE_ID"]
+          # Use the node_id to seed the random generator for reproducibility per node
           np.random.seed(sum(ord(c) for c in node_id))
           
-          # Create a simple synthetic dataset: x in [0,1] and y = 2*x + noise
+          # Create a synthetic dataset: 10 points, x in [0,1]
           x = np.linspace(0, 1, 10)
           noise = np.random.normal(0, 0.1, size=x.shape)
           y = 2 * x + noise
           
-          # Initialize the model (a single weight) to w_initial
+          # Candidate hyperparameter: learning rate sampled between 0.05 and 0.15
+          lr = float(np.random.uniform(0.05, 0.15))
+          
+          # Initialize model weight for a simple linear regression (y_pred = w * x)
           w_initial = 0.5
-          
-          # For a simple linear regression model y_pred = w * x, 
-          # the mean squared error loss L = mean((y - w*x)**2)
-          # has gradient dL/dw = mean(2*(w*x - y)*x)
-          lr = 0.1  # learning rate
-          
+          # Compute gradient of mean squared error loss L = mean((w*x - y)^2)
           grad = np.mean(2 * (w_initial * x - y) * x)
-          # One gradient descent update step
+          # Perform one gradient descent update
           w_updated = w_initial - lr * grad
-          
-          # Compute the update (difference) to serve as our "local update"
+          # Local update is the change in weight
           local_update = w_updated - w_initial
           
-          # For leader election we still simulate an election score (higher is better)
-          election_score = float(np.random.uniform(0, 100))
+          # Compute a validation loss at the updated weight (MSE on the training data)
+          validation_loss = np.mean((w_updated * x - y) ** 2)
+          # For leader election, a higher score is better; we use negative loss so lower loss wins.
+          election_score = -validation_loss
+          
           timestamp = time.time()
           
+          # Save the node's state in a dictionary
           state = {
               "node_id": node_id,
+              "lr": lr,
               "w_initial": float(w_initial),
               "w_updated": float(w_updated),
               "local_update": float(local_update),
               "gradient": float(grad),
+              "validation_loss": float(validation_loss),
               "election_score": election_score,
               "timestamp": timestamp
           }
@@ -73,13 +77,13 @@ jobs:
           with open(filename, "w") as f:
               json.dump(state, f)
           
-          print(f"Node {node_id} updated weight from {w_initial} to {w_updated} (update: {local_update})")
+          print(f"Node {node_id}: lr={lr:.4f}, updated weight from {w_initial} to {w_updated:.4f}, validation loss={validation_loss:.4f}")
           EOF
 
       - name: Upload Node State Artifact
         uses: actions/upload-artifact@v4
         with:
-          # Each node uploads an artifact named state-<node>
+          # Upload each node's JSON state file using a distinct artifact name
           name: state-${{ matrix.node }}
           path: state_${{ matrix.node }}.json
 
@@ -93,7 +97,7 @@ jobs:
       - name: Download All Node Artifacts
         uses: actions/download-artifact@v4
         with:
-          # Download all artifacts into the "node_states" folder
+          # Download artifacts into the "node_states" directory
           path: node_states
 
       - name: List Downloaded Files for Debugging
@@ -101,12 +105,12 @@ jobs:
           echo "Listing contents of node_states directory:"
           ls -R node_states
 
-      - name: Aggregate Global State, Elect Leader, and Compute Consensus Update
+      - name: Aggregate Global State, Elect Best Configuration, and Compute Consensus
         run: |
           python - <<'EOF'
           import glob, json, statistics, sys
           
-          # Recursively search for state JSON files in the node_states directory
+          # Recursively find all state JSON files in the node_states directory
           files = glob.glob("node_states/**/state_*.json", recursive=True)
           if not files:
               print("No node state files found. Exiting aggregator step.")
@@ -118,18 +122,21 @@ jobs:
                   state = json.load(f)
                   nodes_state.append(state)
           
-          # Print global snapshot (all node states)
           print("Global Snapshot of Node States:")
           for state in nodes_state:
               print(state)
           
-          # Perform Leader Election: choose the node with the highest election_score
-          leader = max(nodes_state, key=lambda s: s["election_score"])
-          print("\nElected Leader:", leader["node_id"], "with election score", leader["election_score"])
+          # Leader Election: choose the node with the highest election_score (i.e. lowest validation_loss)
+          best_config = max(nodes_state, key=lambda s: s["election_score"])
+          print("\nBest Hyperparameter Configuration from:", best_config["node_id"])
+          print("Learning Rate:", best_config["lr"])
+          print("Updated Weight:", best_config["w_updated"])
+          print("Validation Loss:", best_config["validation_loss"])
           
-          # Compute Consensus: average the local updates (the weight differences)
-          updates = [s["local_update"] for s in nodes_state]
-          consensus_update = statistics.mean(updates)
-          print("\nConsensus Model Update (Average of Local Updates):", consensus_update)
+          # For consensus, we can compute the average learning rate and average local update
+          avg_lr = statistics.mean([s["lr"] for s in nodes_state])
+          avg_update = statistics.mean([s["local_update"] for s in nodes_state])
+          print("\nAverage Learning Rate across nodes:", avg_lr)
+          print("Average Local Update across nodes:", avg_update)
           EOF
         shell: /usr/bin/bash -e {0}
