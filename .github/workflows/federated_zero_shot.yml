@@ -1,0 +1,76 @@
+name: Federated Zero-Shot Learning
+
+on:
+  push:
+
+jobs:
+  federated-node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [node1, node2, node3]
+    env:
+      # Pass the matrix node identifier into the environment for use in the script
+      NODE_ID: ${{ matrix.node }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install transformers torch
+
+      - name: Run Zero-Shot Classification
+        run: |
+          python - <<'EOF'
+          import os
+          import json
+          from transformers import pipeline
+
+          node_id = os.environ["NODE_ID"]
+          # Initialize the zero-shot classification pipeline
+          classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+          text = f"This is a sample text from {node_id} for federated learning simulation."
+          candidate_labels = ["technology", "finance", "health"]
+          result = classifier(text, candidate_labels)
+          print(f"Results from {node_id}:", result)
+          # Write result to a JSON file
+          output_filename = f"result_{node_id}.json"
+          with open(output_filename, "w") as f:
+              json.dump(result, f)
+          EOF
+
+      - name: Upload Result Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: result-${{ matrix.node }}
+          path: result_${{ matrix.node }}.json
+
+  aggregate:
+    needs: federated-node
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Aggregate and Print Results
+        run: |
+          python - <<'EOF'
+          import json, glob
+
+          # Find all downloaded JSON result files
+          files = glob.glob("artifacts/result_*.json")
+          print("Aggregated Zero-Shot Classification Results:")
+          for file in files:
+              with open(file, "r") as f:
+                  result = json.load(f)
+                  print(f"Result from {file}:", result)
+          EOF
