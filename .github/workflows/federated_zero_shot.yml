@@ -1,3 +1,89 @@
+name: Federated Learning Distributed Simulation
+
+on:
+  push:
+
+jobs:
+  federated_node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Simulate a set of nodes; extend this list to 20 nodes as needed.
+        node: [node1, node2, node3, node4, node5]
+    env:
+      NODE_ID: ${{ matrix.node }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy
+
+      - name: Simulate Local Training, Election, and Snapshot
+        run: |
+          python - <<'EOF'
+          import os, json, random, time
+          
+          # Unique node identifier from environment
+          node_id = os.environ["NODE_ID"]
+          
+          # Simulate a local training update (e.g., model weight update)
+          local_update = random.uniform(0, 1)
+          
+          # Simulate an election candidate score (higher is better)
+          election_score = random.uniform(0, 100)
+          
+          # Simulate a timestamp for snapshot purposes
+          timestamp = time.time()
+          
+          # Create the node's local state dictionary
+          state = {
+              "node_id": node_id,
+              "local_update": local_update,
+              "election_score": election_score,
+              "timestamp": timestamp
+          }
+          
+          # Save the local state to a JSON file
+          filename = f"state_{node_id}.json"
+          with open(filename, "w") as f:
+              json.dump(state, f)
+          
+          print(f"Node {node_id} state saved in {filename}.")
+          EOF
+
+      - name: Upload Node State Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # Each node uploads an artifact named state-<node>
+          name: state-${{ matrix.node }}
+          path: state_${{ matrix.node }}.json
+
+  aggregator:
+    needs: federated_node
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download All Node Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # Download all artifacts into the "node_states" folder
+          path: node_states
+
+      - name: List Downloaded Files for Debugging
+        run: |
+          echo "Listing contents of node_states directory:"
+          ls -R node_states
+
       - name: Aggregate Global State, Elect Leader, and Compute Consensus Update
         run: |
           python - <<'EOF'
