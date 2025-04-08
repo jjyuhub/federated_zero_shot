@@ -1,76 +1,106 @@
-name: Federated Zero-Shot Learning
+name: Federated Learning Distributed Simulation
 
 on:
   push:
 
 jobs:
-  federated-node:
+  federated_node:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [node1, node2, node3]
+        # Simulate a set of nodes (adjust the list to 20 for a full-scale run)
+        node: [node1, node2, node3, node4, node5]
     env:
-      # Pass the matrix node identifier into the environment for use in the script
       NODE_ID: ${{ matrix.node }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.x"
+          python-version: '3.x'
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install transformers torch
+          pip install numpy
 
-      - name: Run Zero-Shot Classification
+      - name: Simulate Local Training, Leader Election, and Global Snapshot
         run: |
           python - <<'EOF'
-          import os
-          import json
-          from transformers import pipeline
-
+          import os, json, random, time
+          
+          # Unique node identifier from environment
           node_id = os.environ["NODE_ID"]
-          # Initialize the zero-shot classification pipeline
-          classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
-          text = f"This is a sample text from {node_id} for federated learning simulation."
-          candidate_labels = ["technology", "finance", "health"]
-          result = classifier(text, candidate_labels)
-          print(f"Results from {node_id}:", result)
-          # Write result to a JSON file
-          output_filename = f"result_{node_id}.json"
-          with open(output_filename, "w") as f:
-              json.dump(result, f)
+          
+          # Simulate a local training update (e.g., a model weight update)
+          local_update = random.uniform(0, 1)
+          
+          # Simulate a candidate score for leader election (higher is better)
+          election_score = random.uniform(0, 100)
+          
+          # Simulate a timestamp for snapshot purposes
+          timestamp = time.time()
+          
+          # Create a dictionary representing the node's local state
+          state = {
+              "node_id": node_id,
+              "local_update": local_update,
+              "election_score": election_score,
+              "timestamp": timestamp
+          }
+          
+          # Save the local state to a JSON file named for this node
+          filename = f"state_{node_id}.json"
+          with open(filename, "w") as f:
+              json.dump(state, f)
+          
+          print(f"Node {node_id} state saved in {filename}.")
           EOF
 
-      - name: Upload Result Artifact
-        uses: actions/upload-artifact@v3
+      - name: Upload Node State Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: result-${{ matrix.node }}
-          path: result_${{ matrix.node }}.json
+          name: state-${{ matrix.node }}
+          path: state_${{ matrix.node }}.json
 
-  aggregate:
-    needs: federated-node
+  aggregator:
+    needs: federated_node
     runs-on: ubuntu-latest
     steps:
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v3
-        with:
-          path: artifacts
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Aggregate and Print Results
+      - name: Download All Node Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: node_states
+
+      - name: Aggregate Global State, Elect Leader, and Compute Consensus Update
         run: |
           python - <<'EOF'
-          import json, glob
-
-          # Find all downloaded JSON result files
-          files = glob.glob("artifacts/result_*.json")
-          print("Aggregated Zero-Shot Classification Results:")
+          import glob, json, statistics
+          
+          # Load all node state files from the artifact directory
+          files = glob.glob("node_states/state_*.json")
+          nodes_state = []
           for file in files:
               with open(file, "r") as f:
-                  result = json.load(f)
-                  print(f"Result from {file}:", result)
+                  state = json.load(f)
+                  nodes_state.append(state)
+          
+          # Print global snapshot (all nodes' states)
+          print("Global Snapshot of Node States:")
+          for state in nodes_state:
+              print(state)
+          
+          # Perform Leader Election: Choose the node with the highest election_score
+          leader = max(nodes_state, key=lambda s: s["election_score"])
+          print("\nElected Leader:", leader["node_id"], "with election score", leader["election_score"])
+          
+          # Compute Consensus: For instance, average the local updates
+          updates = [s["local_update"] for s in nodes_state]
+          consensus_update = statistics.mean(updates)
+          print("\nConsensus Model Update (Average of Local Updates):", consensus_update)
           EOF
