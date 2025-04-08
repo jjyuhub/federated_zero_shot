@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Simulate a set of nodes; increase the list up to 20 nodes as needed.
+        # Simulate a set of nodes; extend this list to 20 nodes as needed.
         node: [node1, node2, node3, node4, node5]
     env:
       NODE_ID: ${{ matrix.node }}
@@ -31,7 +31,7 @@ jobs:
           python - <<'EOF'
           import os, json, random, time
           
-          # Unique node identifier
+          # Unique node identifier from environment
           node_id = os.environ["NODE_ID"]
           
           # Simulate a local training update (e.g., model weight update)
@@ -43,7 +43,7 @@ jobs:
           # Simulate a timestamp for snapshot purposes
           timestamp = time.time()
           
-          # Create the node's local state
+          # Create the node's local state dictionary
           state = {
               "node_id": node_id,
               "local_update": local_update,
@@ -51,7 +51,7 @@ jobs:
               "timestamp": timestamp
           }
           
-          # Save local state to a JSON file
+          # Save the local state to a JSON file
           filename = f"state_{node_id}.json"
           with open(filename, "w") as f:
               json.dump(state, f)
@@ -62,6 +62,7 @@ jobs:
       - name: Upload Node State Artifact
         uses: actions/upload-artifact@v4
         with:
+          # Each node uploads an artifact named state-<node>
           name: state-${{ matrix.node }}
           path: state_${{ matrix.node }}.json
 
@@ -75,7 +76,13 @@ jobs:
       - name: Download All Node Artifacts
         uses: actions/download-artifact@v4
         with:
+          # Download all artifacts into the "node_states" folder
           path: node_states
+
+      - name: List Downloaded Files for Debugging
+        run: |
+          echo "Listing contents of node_states directory:"
+          ls -R node_states
 
       - name: Aggregate Global State, Elect Leader, and Compute Consensus Update
         run: |
@@ -86,7 +93,7 @@ jobs:
           files = glob.glob("node_states/state_*.json")
           if not files:
               print("No node state files found. Exiting aggregator step.")
-              sys.exit(0)
+              sys.exit(1)
           
           nodes_state = []
           for file in files:
