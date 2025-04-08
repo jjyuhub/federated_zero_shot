@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Simulate a set of nodes (adjust the list to 20 for a full-scale run)
+        # Simulate a set of nodes; increase the list up to 20 nodes as needed.
         node: [node1, node2, node3, node4, node5]
     env:
       NODE_ID: ${{ matrix.node }}
@@ -26,24 +26,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy
 
-      - name: Simulate Local Training, Leader Election, and Global Snapshot
+      - name: Simulate Local Training, Election, and Snapshot
         run: |
           python - <<'EOF'
           import os, json, random, time
           
-          # Unique node identifier from environment
+          # Unique node identifier
           node_id = os.environ["NODE_ID"]
           
-          # Simulate a local training update (e.g., a model weight update)
+          # Simulate a local training update (e.g., model weight update)
           local_update = random.uniform(0, 1)
           
-          # Simulate a candidate score for leader election (higher is better)
+          # Simulate an election candidate score (higher is better)
           election_score = random.uniform(0, 100)
           
           # Simulate a timestamp for snapshot purposes
           timestamp = time.time()
           
-          # Create a dictionary representing the node's local state
+          # Create the node's local state
           state = {
               "node_id": node_id,
               "local_update": local_update,
@@ -51,7 +51,7 @@ jobs:
               "timestamp": timestamp
           }
           
-          # Save the local state to a JSON file named for this node
+          # Save local state to a JSON file
           filename = f"state_{node_id}.json"
           with open(filename, "w") as f:
               json.dump(state, f)
@@ -80,17 +80,21 @@ jobs:
       - name: Aggregate Global State, Elect Leader, and Compute Consensus Update
         run: |
           python - <<'EOF'
-          import glob, json, statistics
+          import glob, json, statistics, sys
           
-          # Load all node state files from the artifact directory
+          # Find all state JSON files in the downloaded artifacts directory
           files = glob.glob("node_states/state_*.json")
+          if not files:
+              print("No node state files found. Exiting aggregator step.")
+              sys.exit(0)
+          
           nodes_state = []
           for file in files:
               with open(file, "r") as f:
                   state = json.load(f)
                   nodes_state.append(state)
           
-          # Print global snapshot (all nodes' states)
+          # Print global snapshot (all node states)
           print("Global Snapshot of Node States:")
           for state in nodes_state:
               print(state)
@@ -99,8 +103,9 @@ jobs:
           leader = max(nodes_state, key=lambda s: s["election_score"])
           print("\nElected Leader:", leader["node_id"], "with election score", leader["election_score"])
           
-          # Compute Consensus: For instance, average the local updates
+          # Compute Consensus: For example, average the local updates
           updates = [s["local_update"] for s in nodes_state]
           consensus_update = statistics.mean(updates)
           print("\nConsensus Model Update (Average of Local Updates):", consensus_update)
           EOF
+        shell: /usr/bin/bash -e {0}
