@@ -26,37 +26,54 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy
 
-      - name: Simulate Local Training, Election, and Snapshot
+      - name: Simulate Local Training Update, Leader Election, and Snapshot
         run: |
           python - <<'EOF'
-          import os, json, random, time
+          import os, json, time, numpy as np
           
-          # Unique node identifier from environment
+          # Use the node's identifier as seed basis for reproducibility
           node_id = os.environ["NODE_ID"]
+          np.random.seed(sum(ord(c) for c in node_id))
           
-          # Simulate a local training update (e.g., model weight update)
-          local_update = random.uniform(0, 1)
+          # Create a simple synthetic dataset: x in [0,1] and y = 2*x + noise
+          x = np.linspace(0, 1, 10)
+          noise = np.random.normal(0, 0.1, size=x.shape)
+          y = 2 * x + noise
           
-          # Simulate an election candidate score (higher is better)
-          election_score = random.uniform(0, 100)
+          # Initialize the model (a single weight) to w_initial
+          w_initial = 0.5
           
-          # Simulate a timestamp for snapshot purposes
+          # For a simple linear regression model y_pred = w * x, 
+          # the mean squared error loss L = mean((y - w*x)**2)
+          # has gradient dL/dw = mean(2*(w*x - y)*x)
+          lr = 0.1  # learning rate
+          
+          grad = np.mean(2 * (w_initial * x - y) * x)
+          # One gradient descent update step
+          w_updated = w_initial - lr * grad
+          
+          # Compute the update (difference) to serve as our "local update"
+          local_update = w_updated - w_initial
+          
+          # For leader election we still simulate an election score (higher is better)
+          election_score = float(np.random.uniform(0, 100))
           timestamp = time.time()
           
-          # Create the node's local state dictionary
           state = {
               "node_id": node_id,
-              "local_update": local_update,
+              "w_initial": float(w_initial),
+              "w_updated": float(w_updated),
+              "local_update": float(local_update),
+              "gradient": float(grad),
               "election_score": election_score,
               "timestamp": timestamp
           }
           
-          # Save the local state to a JSON file
           filename = f"state_{node_id}.json"
           with open(filename, "w") as f:
               json.dump(state, f)
           
-          print(f"Node {node_id} state saved in {filename}.")
+          print(f"Node {node_id} updated weight from {w_initial} to {w_updated} (update: {local_update})")
           EOF
 
       - name: Upload Node State Artifact
@@ -89,7 +106,7 @@ jobs:
           python - <<'EOF'
           import glob, json, statistics, sys
           
-          # Find all state JSON files recursively in the node_states directory
+          # Recursively search for state JSON files in the node_states directory
           files = glob.glob("node_states/**/state_*.json", recursive=True)
           if not files:
               print("No node state files found. Exiting aggregator step.")
@@ -106,11 +123,11 @@ jobs:
           for state in nodes_state:
               print(state)
           
-          # Perform Leader Election: Choose the node with the highest election_score
+          # Perform Leader Election: choose the node with the highest election_score
           leader = max(nodes_state, key=lambda s: s["election_score"])
           print("\nElected Leader:", leader["node_id"], "with election score", leader["election_score"])
           
-          # Compute Consensus: For example, average the local updates
+          # Compute Consensus: average the local updates (the weight differences)
           updates = [s["local_update"] for s in nodes_state]
           consensus_update = statistics.mean(updates)
           print("\nConsensus Model Update (Average of Local Updates):", consensus_update)
